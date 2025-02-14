@@ -46,7 +46,7 @@ class Scene:
 
         builder.add_shape_box(
             body=b,
-            pos=(0, 0.3, 0),
+            pos=(0, 1, 0),
             hx=0.3, hy=0.3, hz=0.3,
             density=self.density_value,
             kf=0.05
@@ -95,6 +95,9 @@ class Scene:
                 [[0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]] 
             )
 
+            # Custom warp kernel to assign forces instead of "assign"
+
+
             self.integrator.simulate(self.model, self.states[i], self.states[i + 1], self.sim_dt)
 
         wp.launch(loss_kernel, dim=1, inputs=[self.states[-1].body_q, self.target, self.loss])
@@ -141,10 +144,10 @@ class Scene:
                 self.render_time += self.frame_dt
 
 if __name__ == "__main__":
-    iter = 2
+    iter = 5
     with wp.ScopedDevice(wp.get_cuda_devices()[0]):
         scene = Scene()
         for i in range(iter):
             scene.step()
-            if i % 16 == 0:
-                scene.render(i)
+            # if i % 16 == 0:
+            scene.render(i)
