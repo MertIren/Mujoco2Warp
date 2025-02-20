@@ -18,15 +18,16 @@
 ###########################################################################
 
 import numpy as np
+import os
 
 import warp as wp
 import warp.optim
 import warp.sim
 import warp.sim.render
 
-from pxr import Usd, UsdGeom, Gf
 import math
-
+from pxr import Gf, Usd, UsdGeom
+import openmesh
 
 def quad_mesh_to_triangles(face_idxs, vertex_count):
 
@@ -60,7 +61,6 @@ def quad_mesh_to_triangles(face_idxs, vertex_count):
     assert (offset == face_idxs.shape[0])
 
     return np.array(tri_idxs)
-
 
 
 @wp.kernel
@@ -114,7 +114,7 @@ class Example:
         self.material_behavior = material_behavior
 
         # seconds
-        sim_duration = 2.0
+        sim_duration = 1.0
 
         # control frequency
         fps = 60
@@ -122,7 +122,7 @@ class Example:
         frame_steps = int(sim_duration / self.frame_dt)
 
         # sim frequency
-        self.sim_substeps = 30
+        self.sim_substeps = 16
         self.sim_steps = frame_steps * self.sim_substeps
         self.sim_dt = self.frame_dt / self.sim_substeps
 
@@ -138,17 +138,14 @@ class Example:
 
         # Create FEM model.
         self.cell_dim = 2
-        # self.cell_dim = 2
-
         self.cell_size = 0.1
         center = self.cell_size * self.cell_dim * 0.5
-        # self.grid_origin = wp.vec3(-1.5, 10.0, -center)
-        self.grid_origin = wp.vec3(0.0, 10.0, 0.0)
+        self.grid_origin = wp.vec3(0, 2.0, -center)
         self.create_model()
 
         self.integrator = wp.sim.SemiImplicitIntegrator()
 
-        self.target = wp.vec3(0.0, 7.5, -5.0)
+        self.target = wp.vec3(2.0, 2.5, 3.0)
         # Initialize material parameters
         if self.material_behavior == "anisotropic":
             # Different Lame parameters for each tet
@@ -197,12 +194,20 @@ class Example:
 
     def create_model(self):
         builder = wp.sim.ModelBuilder()
-        # builder.default_particle_radius = 0.0050
-        builder.default_particle_radius = 0.0005
+        # builder.default_particle_radius = 0.0005*100
 
+        asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bear.usd")
 
+        geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/root/bear"))
+        points = geom.GetPointsAttr().Get()
 
-        
+        xform = Gf.Matrix4f(geom.ComputeLocalToWorldTransform(0.0))
+        for i in range(len(points)):
+            points[i] = xform.Transform(points[i])
+
+        self.points = [wp.vec3(point) for point in points]
+        self.tet_indices = geom.GetPrim().GetAttribute("tetraIndices").Get()
+
         total_mass = 0.2
         num_particles = (self.cell_dim + 1) ** 3
         particle_mass = total_mass / num_particles
@@ -215,63 +220,71 @@ class Example:
         k_mu = 0.5 * young_mod / (1.0 + poisson_ratio)
         k_lambda = young_mod * poisson_ratio / ((1 + poisson_ratio) * (1 - 2 * poisson_ratio))
 
-        builder.add_soft_grid(
-            pos=self.grid_origin,
+        builder.add_soft_mesh(
+            pos=wp.vec3(-1.0, 1.5, 0.0),
             rot=wp.quat_identity(),
+            scale=1.0,
             vel=wp.vec3(0.0, 0.0, 0.0),
-            dim_x=self.cell_dim,
-            dim_y=self.cell_dim,
-            dim_z=self.cell_dim,
-            cell_x=self.cell_size,
-            cell_y=self.cell_size,
-            cell_z=self.cell_size,
-            density=particle_density,
-            k_mu=k_mu,
-            k_lambda=k_lambda,
-            k_damp=0.0,
-            tri_ke=1e-4,
-            tri_ka=1e-4,
-            tri_kd=1e-4,
+            vertices=self.points,
+            indices=self.tet_indices,
+            density=1.0,
+            k_mu=2000.0,
+            k_lambda=2000.0,
+            k_damp=2.0,
+            tri_ke=0.0,
+            tri_ka=1e-8,
+            tri_kd=0.0,
             tri_drag=0.0,
             tri_lift=0.0,
-            fix_bottom=False,
         )
 
-        # cell_dim = 20
-        # cell_size = 2.0 / cell_dim
-
-        # center = cell_size * cell_dim * 0.5
 
         # builder.add_soft_grid(
-        #     pos=wp.vec3(-5*center, 20.0, -5*center),
+        #     pos=self.grid_origin,
         #     rot=wp.quat_identity(),
-        #     vel=wp.vec3(0.0, 0.0, 0.0),
-        #     dim_x=cell_dim,
-        #     dim_y=cell_dim,
-        #     dim_z=cell_dim,
-        #     cell_x=cell_size,
-        #     cell_y=cell_size,
-        #     cell_z=cell_size,
-        #     density=10.0,
-        #     # fix_bottom=True,
-        #     # fix_top=True,
-        #     k_mu=1000.0,
-        #     k_lambda=5000.0,
+        #     vel=wp.vec3(5.0, -5.0, 0.0),
+        #     dim_x=self.cell_dim,
+        #     dim_y=self.cell_dim,
+        #     dim_z=self.cell_dim,
+        #     cell_x=self.cell_size,
+        #     cell_y=self.cell_size,
+        #     cell_z=self.cell_size,
+        #     density=particle_density,
+        #     k_mu=k_mu,
+        #     k_lambda=k_lambda,
         #     k_damp=0.0,
+        #     tri_ke=1e-4,
+        #     tri_ka=1e-4,
+        #     tri_kd=1e-4,
+        #     tri_drag=0.0,
+        #     tri_lift=0.0,
+        #     fix_bottom=False,
         # )
-
-        
-
 
         ke = 1.0e3
         kf = 0.0
         kd = 1.0e0
         mu = 0.2
+        # builder.add_shape_box(
+        #     body=-1,
+        #     pos=wp.vec3(2.0, 1.0, 0.0),
+        #     hx=0.25,
+        #     hy=1.0,
+        #     hz=1.0,
+        #     ke=ke,
+        #     kf=kf,
+        #     kd=kd,
+        #     mu=mu,
+        # )
+
 
         # asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bowl/Bowl.geom.usd")
         # mesh_geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/Bowl/Geom/Bowl"))
+
         asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bunny.usd")
         mesh_geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/root/bunny"))
+
+        
 
         points = mesh_geom.GetPointsAttr().Get()
         xform = Gf.Matrix4f(mesh_geom.ComputeLocalToWorldTransform(0.0))
@@ -283,38 +296,28 @@ class Example:
         vertex_count = np.array(mesh_geom.GetFaceVertexCountsAttr().Get()).flatten()
 
         indices = quad_mesh_to_triangles(indices, vertex_count)
-        bowl = wp.sim.Mesh(points, indices)
 
+        # m = openmesh.read_trimesh("/home/miren/Documents/ParamOpt/assets/Hat.obj")
+        # mesh_points = np.array(m.points())
+        # mesh_indices = np.array(m.face_vertex_indices(), dtype=np.int32).flatten()
+        # bunny = wp.sim.Mesh(mesh_points, mesh_indices)
 
+        # bunny = wp.sim.Mesh(points, indices)
         # builder.add_shape_mesh( 
         #     body = -1,
-        #     mesh = bowl,
-        #     rot = wp.quat_from_axis_angle(wp.vec3(1, 0, 0), math.pi*-0.5),
-        #     # rot = wp.quat_identity(),
-        #     scale = (5.0, 5.0, 5.0),
-        #     # scale = (0.2, 0.2, 0.2),
-        #     pos = wp.vec3(0, 5, 2.5),
-        #     thickness=1e-01,
+        #     mesh = bunny,
+        #     # rot = wp.quat_from_axis_angle(wp.vec3(1, 0, 0), math.pi*0.5),
+        #     rot = wp.quat_identity(),
+        #     scale = (1.0, 1.0, 1.0),
+        #     # scale = (0.02, 0.02, 0.02),
+        #     pos = wp.vec3(1.0, 0.2, -0.3),
+        #     # thickness=1e-01,
         #     ke = ke,
         #     kf = kf,
         #     kd = kd,
         #     mu = mu
         # )
 
-        
-
-        builder.add_shape_box(
-            body=-1,
-            # pos=wp.vec3(1.5, 7.5, -2.5),
-            pos=wp.vec3(0, 7.5, 0),
-            hx=1.0,
-            hy=1.0,
-            hz=0.25,
-            ke=ke,
-            kf=kf,
-            kd=kd,
-            mu=mu,
-        )
 
         # use `requires_grad=True` to create a model for differentiable simulation
         self.model = builder.finalize(requires_grad=True)
@@ -324,7 +327,8 @@ class Example:
         self.model.soft_contact_kf = kf
         self.model.soft_contact_kd = kd
         self.model.soft_contact_mu = mu
-        self.model.soft_contact_margin = 0.001
+        # self.model.soft_contact_margin = 0.001
+        self.model.soft_contact_margin = 0.01
         self.model.soft_contact_restitution = 1.0
 
     def forward(self):
@@ -387,9 +391,10 @@ class Example:
                 ),
                 outputs=(self.material_params,),
             )
+            if self.verbose:
+                self.log_step()
 
             self.losses.append(self.loss.numpy()[0])
-            # print(self.loss.numpy()[0])
 
             # clear grads for next iteration
             self.tape.zero()
@@ -403,7 +408,7 @@ class Example:
         x = self.material_params.numpy().reshape(-1, 2)
         x_grad = self.material_params.grad.numpy().reshape(-1, 2)
 
-        # pri
+        print(f"Shape of x: {x.shape}, Shape of x_grad: {x_grad.shape}")
 
         print(f"Iter: {self.iter} Loss: {self.loss.numpy()[0]}")
 
@@ -498,7 +503,6 @@ if __name__ == "__main__":
             example.step()
             if i == 0 or i % 50 == 0 or i == args.train_iters - 1:
                 example.render()
-
 
         if example.renderer:
             example.renderer.save()
