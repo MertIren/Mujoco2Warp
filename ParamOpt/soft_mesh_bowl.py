@@ -6,6 +6,41 @@ import warp.sim
 import warp.sim.render
 
 from pxr import Usd, UsdGeom, Gf
+import math
+
+def quad_mesh_to_triangles(face_idxs, vertex_count):
+
+    tri_idxs = []
+    
+    offset = 0
+    for count in vertex_count:
+        assert(count == 3 or count == 4)
+        if count == 3:
+            v0 = face_idxs[offset]
+            v1 = face_idxs[offset + 1]
+            v2 = face_idxs[offset + 2]
+
+            offset += 3
+            tri_idxs.extend([v0, v1, v2])
+
+
+        elif count == 4:
+            v0 = face_idxs[offset]
+            v1 = face_idxs[offset + 1]
+            v2 = face_idxs[offset + 2]
+            v3 = face_idxs[offset + 3]
+
+            offset += 4
+            tri_idxs.extend([v0, v1, v2])
+            tri_idxs.extend([v0, v2, v3])
+            
+            tri_idxs.extend([v1, v2, v3])
+            tri_idxs.extend([v0, v1, v3])
+
+    assert (offset == face_idxs.shape[0])
+
+    return np.array(tri_idxs)
+
 
 @wp.kernel
 def assign_param(params: wp.array(dtype=wp.float32), tet_materials: wp.array2d(dtype=wp.float32)):
@@ -66,7 +101,7 @@ class Example:
         frame_steps = int(sim_duration / self.frame_dt)
 
         # sim frequency
-        self.sim_substeps = 16
+        self.sim_substeps = 32
         self.sim_steps = frame_steps * self.sim_substeps
         self.sim_dt = self.frame_dt / self.sim_substeps
 
@@ -78,8 +113,10 @@ class Example:
 
         self.losses = []
 
-        self.hard_lower_bound = wp.float32(500.0)
+        self.hard_lower_bound = wp.float32(150.0)
         self.hard_upper_bound = wp.float32(4e6)
+        # self.hard_upper_bound = wp.float32(2e5)
+
 
         # Create FEM model.
         self.cell_dim = 2
@@ -90,7 +127,7 @@ class Example:
 
         self.integrator = wp.sim.SemiImplicitIntegrator()
 
-        self.target = wp.vec3(-3.0, 6.0, 0.0)
+        self.target = wp.vec3(4.0, 8.0, 0.0)
         # self.target = wp.vec3(-20.0, 30.0, 0.0)
 
         # Initialize material parameters
@@ -158,15 +195,15 @@ class Example:
 
 
         builder.add_soft_mesh(
-            pos=wp.vec3(-1.0, 10.0, 0.0),
+            pos=wp.vec3(-2.0, 10.0, 0.0),
             rot=wp.quat_identity(),
             scale=1.0,
-            vel=wp.vec3(15.0, -10.0, 0.0),
+            vel=wp.vec3(15.0, -5.0, 0.0),
             vertices=self.points,
             indices=self.tet_indices,
-            density=1.5,
-            k_mu=800.0,
-            k_lambda=800.0,
+            density=1.0,
+            k_mu=400.0,
+            k_lambda=400.0,
             k_damp=2.0,
             tri_ke=0.0,
             tri_ka=1e-8,
@@ -179,20 +216,25 @@ class Example:
         kf = 0.0
         kd = 1.0e0
         mu = 0.2
-        builder.add_shape_box(
-            body=-1,
-            pos=wp.vec3(20.0, 1.0, 0.0),
-            hx=5.0,
-            hy=30.0,
-            hz=30.0,
-            ke=ke,
-            kf=kf,
-            kd=kd,
-            mu=mu,
-        )
+        # builder.add_shape_box(
+        #     body=-1,
+        #     pos=wp.vec3(20.0, 1.0, 0.0),
+        #     hx=5.0,
+        #     hy=30.0,
+        #     hz=30.0,
+        #     ke=ke,
+        #     kf=kf,
+        #     kd=kd,
+        #     mu=mu,
+        # )
 
-        asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bunny.usd")
-        mesh_geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/root/bunny"))
+
+        
+        asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bowl/Bowl.geom.usd")
+        mesh_geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/Bowl/Geom/Bowl"))
+
+        # asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bunny.usd")
+        # mesh_geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/root/bunny"))
 
         
 
@@ -208,20 +250,21 @@ class Example:
         indices = quad_mesh_to_triangles(indices, vertex_count)
 
         bunny = wp.sim.Mesh(points, indices)
-        # builder.add_shape_mesh( 
-        #     body = -1,
-        #     mesh = bunny,
-        #     # rot = wp.quat_from_axis_angle(wp.vec3(1, 0, 0), math.pi*0.5),
-        #     rot = wp.quat_identity(),
-        #     scale = (1.0, 1.0, 1.0),
-        #     # scale = (0.02, 0.02, 0.02),
-        #     pos = wp.vec3(1.0, 0.2, -0.3),
-        #     # thickness=1e-01,
-        #     ke = ke,
-        #     kf = kf,
-        #     kd = kd,
-        #     mu = mu
-        # )
+        builder.add_shape_mesh( 
+            body = -1,
+            mesh = bunny,
+            # rot = wp.quat_from_axis_angle(wp.vec3(1, 0, 0), math.pi*-0.5),
+            rot = wp.quat_rpy(math.pi*-0.5, -math.pi*0.5, 0.0),
+            # rot = wp.quat_identity(),
+            scale = (1.0, 1.0, 1.0),
+            # scale = (0.02, 0.02, 0.02),
+            pos = wp.vec3(3.0, 0.0, 0.0),
+            # thickness=1e-01,
+            ke = ke,
+            kf = kf,
+            kd = kd,
+            mu = mu
+        )
 
         # use `requires_grad=True` to create a model for differentiable simulation
         self.model = builder.finalize(requires_grad=True)
@@ -231,7 +274,7 @@ class Example:
         self.model.soft_contact_kf = kf
         self.model.soft_contact_kd = kd
         self.model.soft_contact_mu = mu
-        self.model.soft_contact_margin = 0.001
+        self.model.soft_contact_margin = 1.0
         self.model.soft_contact_restitution = 1.0
 
     def forward(self):
@@ -340,7 +383,7 @@ class Example:
                 self.renderer.render_box(
                     pos=self.target,
                     rot=wp.quat_identity(),
-                    extents=(0.1, 0.1, 0.1),
+                    extents=(0.5, 0.5, 0.5),
                     name="target",
                     color=(0.0, 0.0, 0.0),
                 )
