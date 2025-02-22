@@ -109,7 +109,7 @@ class Example:
         self.render_time = 0.0
 
         # self.train_rate = 1e7
-        self.train_rate = 1e3
+        self.train_rate = 2e-1
 
         self.losses = []
 
@@ -146,7 +146,7 @@ class Example:
                 requires_grad=True,
             )
 
-        self.optimizer = wp.optim.SGD(
+        self.optimizer = wp.optim.Adam(
             [self.material_params],
             lr=self.train_rate,
             nesterov=False,
