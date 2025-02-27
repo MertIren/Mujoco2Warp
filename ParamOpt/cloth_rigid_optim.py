@@ -30,7 +30,7 @@ import numpy as np
 @wp.kernel
 def assign_param(params: wp.array(dtype=wp.vec3), model_params: wp.array(dtype=wp.vec3)):
     tid = wp.tid()
-    model_params[tid] = params[tid]
+    model_params[tid] = params[0]
 
 @wp.kernel
 def com_kernel(positions: wp.array(dtype=wp.vec3), com: wp.array(dtype=wp.vec3)):
@@ -82,18 +82,9 @@ class Example:
 
         self.integrator = wp.sim.SemiImplicitIntegrator()
 
-        self.velocities = wp.array(
-            self.model.particle_qd.numpy(),
-            dtype=wp.vec3,
-            requires_grad=True
-        )
-        print(f"Shape 1: {self.velocities.numpy().shape}, Shape 2: {self.model.particle_qd.numpy().shape}")
+        # print(f"Shape 1: {self.velocities.numpy().shape}, Shape 2: {self.model.particle_qd.numpy().shape}")
 
-        self.optimizer = wp.optim.SGD(
-            [self.velocities],
-            lr=self.train_rate,
-            nesterov=False,
-        )
+        
 
         self.target = (8.0, 0.0, 0.0)
         self.com = wp.zeros(1, dtype=wp.vec3, requires_grad=True)
@@ -104,6 +95,20 @@ class Example:
         self.states = []
         for _i in range(self.sim_steps + 1):
             self.states.append(self.model.state())
+
+        
+        # self.velocities = wp.zeros(1, dtype=wp.vec3, requires_grad=True)
+
+        self.velocities = wp.array(
+            self.states[0].particle_qd.numpy(),
+            dtype=wp.vec3,
+            requires_grad=True
+        )
+        self.optimizer = wp.optim.SGD(
+            [self.velocities],
+            lr=self.train_rate,
+            nesterov=False,
+        )
 
         if stage_path:
             self.renderer = wp.sim.render.SimRenderer(self.model, stage_path, scaling=4.0)
@@ -193,7 +198,7 @@ class Example:
             kernel=assign_param,
             dim=self.model.particle_count,
             inputs=(self.velocities,),
-            outputs=(self.model.particle_qd,),
+            outputs=(self.states[0].particle_qd,),
         )
 
         # run control loop
@@ -229,7 +234,7 @@ class Example:
             if self.verbose:
                 self.log_step()
         
-            # self.optimizer.step([self.velocities.grad])
+            self.optimizer.step([self.velocities.grad])
 
 
             # wp.launch(step_kernel, dim=len(x), inputs=[x, x.grad, self.train_rate])
