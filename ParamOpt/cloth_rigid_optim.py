@@ -21,26 +21,32 @@ import math
 
 import warp as wp
 import warp.sim
+import warp.optim
 import warp.sim.render
 
 from pxr import Usd, UsdGeom, Gf
 import numpy as np
 
 @wp.kernel
-def com_kernel(positions: wp.array(dtype=wp.vec3), n: int, com: wp.array(dtype=wp.vec3)):
+def assign_param(params: wp.array(dtype=wp.vec3), model_params: wp.array(dtype=wp.vec3)):
+    tid = wp.tid()
+    model_params[tid] = params[tid]
+
+@wp.kernel
+def com_kernel(positions: wp.array(dtype=wp.vec3), com: wp.array(dtype=wp.vec3)):
     tid = wp.tid()
 
     # compute center of mass
-    wp.atomic_add(com, 0, positions[tid] / float(n))
+    wp.atomic_add(com, 0, positions[tid] / wp.float32(positions.shape[0]))
 
 
 @wp.kernel
-def loss_kernel(com: wp.array(dtype=wp.vec3), target: wp.vec3, loss: wp.array(dtype=float)):
+def loss_kernel(com: wp.array(dtype=wp.vec3), target: wp.vec3, pos_error: wp.array(dtype=float), loss: wp.array(dtype=float)):
     # sq. distance to target
-    delta = com[0] - target
-
-    loss[0] = wp.dot(delta, delta)
-
+    diff = com[0] - target
+    pos_error[0] = wp.dot(diff, diff)
+    norm = pos_error[0]
+    loss[0] = norm
 
 @wp.kernel
 def step_kernel(x: wp.array(dtype=wp.vec3), grad: wp.array(dtype=wp.vec3), alpha: float):
@@ -72,6 +78,49 @@ class Example:
 
         self.train_rate = 5.0
 
+        self.create_model()
+
+        self.integrator = wp.sim.SemiImplicitIntegrator()
+
+        self.velocities = wp.array(
+            self.model.particle_qd.numpy(),
+            dtype=wp.vec3,
+            requires_grad=True
+        )
+        print(f"Shape 1: {self.velocities.numpy().shape}, Shape 2: {self.model.particle_qd.numpy().shape}")
+
+        self.optimizer = wp.optim.SGD(
+            [self.velocities],
+            lr=self.train_rate,
+            nesterov=False,
+        )
+
+        self.target = (8.0, 0.0, 0.0)
+        self.com = wp.zeros(1, dtype=wp.vec3, requires_grad=True)
+        self.pos_error = wp.zeros(1, dtype=wp.float32, requires_grad=True)
+        self.loss = wp.zeros(1, dtype=wp.float32, requires_grad=True)
+
+        # allocate sim states for trajectory
+        self.states = []
+        for _i in range(self.sim_steps + 1):
+            self.states.append(self.model.state())
+
+        if stage_path:
+            self.renderer = wp.sim.render.SimRenderer(self.model, stage_path, scaling=4.0)
+        else:
+            self.renderer = None
+
+        # capture forward/backward passes
+        self.use_cuda_graph = wp.get_device().is_cuda
+        if self.use_cuda_graph:
+            with wp.ScopedCapture() as capture:
+                self.tape = wp.Tape()
+                with self.tape:
+                    self.forward()
+                self.tape.backward(self.loss)
+            self.graph = capture.graph
+
+    def create_model(self):
         builder = wp.sim.ModelBuilder()
         # builder.default_particle_radius = 0.01
 
@@ -133,36 +182,20 @@ class Example:
         # )
 
 
-        self.model = builder.finalize()
+        self.model = builder.finalize(requires_grad=True)
         self.model.ground = False
 
-        self.integrator = wp.sim.SemiImplicitIntegrator()
 
-        self.target = (8.0, 0.0, 0.0)
-        self.com = wp.zeros(1, dtype=wp.vec3, requires_grad=True)
-        self.loss = wp.zeros(1, dtype=wp.float32, requires_grad=True)
-
-        # allocate sim states for trajectory
-        self.states = []
-        for _i in range(self.sim_steps + 1):
-            self.states.append(self.model.state(requires_grad=True))
-
-        if stage_path:
-            self.renderer = wp.sim.render.SimRenderer(self.model, stage_path, scaling=4.0)
-        else:
-            self.renderer = None
-
-        # capture forward/backward passes
-        self.use_cuda_graph = wp.get_device().is_cuda
-        if self.use_cuda_graph:
-            with wp.ScopedCapture() as capture:
-                self.tape = wp.Tape()
-                with self.tape:
-                    self.forward()
-                self.tape.backward(self.loss)
-            self.graph = capture.graph
 
     def forward(self):
+        # print(self.model.particle_qd.numpy)
+        wp.launch(
+            kernel=assign_param,
+            dim=self.model.particle_count,
+            inputs=(self.velocities,),
+            outputs=(self.model.particle_qd,),
+        )
+
         # run control loop
         for i in range(self.sim_steps):
             wp.sim.collide(self.model, self.states[i])
@@ -175,9 +208,10 @@ class Example:
         wp.launch(
             com_kernel,
             dim=self.model.particle_count,
-            inputs=[self.states[-1].particle_q, self.model.particle_count, self.com],
+            inputs=[self.states[-1].particle_q,],
+            outputs=(self.com,),
         )
-        wp.launch(loss_kernel, dim=1, inputs=[self.com, self.target, self.loss])
+        wp.launch(loss_kernel, dim=1, inputs=[self.com, self.target,], outputs=(self.pos_error, self.loss,),)
 
     def step(self):
         with wp.ScopedTimer("step"):
@@ -187,24 +221,36 @@ class Example:
                 self.tape = wp.Tape()
                 with self.tape:
                     self.forward()
-                self.tape.backward(self.loss)
+                self.tape.backward(loss=self.loss)
 
             # gradient descent step
-            x = self.states[0].particle_qd
+            # x = self.states[0].particle_qd
 
             if self.verbose:
                 self.log_step()
         
-            wp.launch(step_kernel, dim=len(x), inputs=[x, x.grad, self.train_rate])
+            # self.optimizer.step([self.velocities.grad])
+
+
+            # wp.launch(step_kernel, dim=len(x), inputs=[x, x.grad, self.train_rate])
 
             # clear grads for next iteration
             self.tape.zero()
+            self.loss.zero_()
+            self.com.zero_()
+            self.pos_error.zero_()
 
             self.iter = self.iter + 1
 
     def log_step(self):
+        x = self.velocities.numpy()
+        x_grad = self.velocities.grad.numpy()
+
         print(f"Iter: {self.iter} Loss: {self.loss}")
+        # print(f"Velocities shape: {self.states[0].particle_qd.numpy().shape}")
         # print(f"Particle Velocities: {self.states[0].particle_qd.numpy()}")
+
+        print(f"Max grad: {np.max(x_grad)}, Min grad: {np.min(x_grad)}")
 
 
 
