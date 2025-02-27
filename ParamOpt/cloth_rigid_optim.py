@@ -76,7 +76,7 @@ class Example:
         self.iter = 0
         self.render_time = 0.0
 
-        self.train_rate = 5.0
+        self.train_rate = 0.001
 
         self.create_model()
 
@@ -100,7 +100,7 @@ class Example:
         # self.velocities = wp.zeros(1, dtype=wp.vec3, requires_grad=True)
 
         self.velocities = wp.array(
-            self.states[0].particle_qd.numpy(),
+            self.states[0].particle_qd.numpy()[0],
             dtype=wp.vec3,
             requires_grad=True
         )
@@ -255,6 +255,7 @@ class Example:
         # print(f"Velocities shape: {self.states[0].particle_qd.numpy().shape}")
         # print(f"Particle Velocities: {self.states[0].particle_qd.numpy()}")
 
+        print(f"Max velocity: {np.max(x)}, Min velocity: {np.min(x)}")
         print(f"Max grad: {np.max(x_grad)}, Min grad: {np.min(x_grad)}")
 
 
