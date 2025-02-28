@@ -76,7 +76,7 @@ class Example:
         self.iter = 0
         self.render_time = 0.0
 
-        self.train_rate = 0.001
+        self.train_rate = 0.01
 
         self.create_model()
 
@@ -129,14 +129,15 @@ class Example:
         builder = wp.sim.ModelBuilder()
         # builder.default_particle_radius = 0.01
 
-        dim_x = 48
-        dim_y = 48
+        dim_x = 24
+        dim_y = 24
 
 
         builder.add_cloth_grid(
             pos=wp.vec3(0.0, 0.0, 0.0),
             vel=wp.vec3(0.1, 0.1, 0.0),
-            rot=wp.quat_from_axis_angle(wp.vec3(1.0, 0.0, 0.0), -math.pi * 0.25),
+            rot=wp.quat_from_axis_angle(wp.vec3(1.0, 0.0, 0.0), -math.pi * 0.5),
+            # rot = wp.quat_identity(),
             dim_x=dim_x,
             dim_y=dim_y,
             cell_x=0.1,
@@ -149,17 +150,17 @@ class Example:
             # tri_drag=5.0,
         )
 
-        # builder.add_shape_box(
-        #     body=-1,
-        #     pos=wp.vec3(1.0, -2.0, 0.0),
-        #     rot=wp.quat_identity(),
-        #     hx=0.3, hy=0.3, hz=0.3,
-        #     ke=1.0e2,
-        #     kd=1.0e2,
-        #     kf=1.0e1,
-        #     # friction=1.0,
-        #     # restitution=0.5,
-        # )
+        builder.add_shape_box(
+            body=-1,
+            pos=wp.vec3(8.0, -2.0, 0.0),
+            rot=wp.quat_identity(),
+            hx=2.0, hy=1.0, hz=2.0,
+            ke=1.0e2,
+            kd=1.0e2,
+            kf=1.0e1,
+            # friction=1.0,
+            # restitution=0.5,
+        )
 
         # asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bunny.usd")
         # mesh_geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/root/bunny"))
@@ -313,7 +314,7 @@ if __name__ == "__main__":
         # replay and optimize
         for i in range(args.train_iters):
             example.step()
-            if i % 4 == 0:
+            if i % 1 == 0 or i == args.train_iters-1:
                 example.render()
 
         if example.renderer:
