@@ -92,7 +92,7 @@ class Example:
         frame_steps = int(sim_duration / self.frame_dt)
 
         # sim frequency
-        self.sim_substeps = 32
+        self.sim_substeps = 10
         self.sim_steps = frame_steps * self.sim_substeps
         self.sim_dt = self.frame_dt / self.sim_substeps
 
@@ -110,15 +110,16 @@ class Example:
 
 
         # Create FEM model.
-        self.cell_dim = 2
-        self.cell_size = 0.1
-        center = self.cell_size * self.cell_dim * 0.5
-        self.grid_origin = wp.vec3(-0.5, 1.0, -center)
+        # self.cell_dim = 2
+        # self.cell_size = 0.1
+        # center = self.cell_size * self.cell_dim * 0.5
+        # self.grid_origin = wp.vec3(-0.5, 1.0, -center)
         self.create_model()
 
+        # self.integrator = wp.sim.FeatherstoneIntegrator(self.model)
         self.integrator = wp.sim.SemiImplicitIntegrator()
 
-        self.target = wp.vec3(4.0, 8.0, 0.0)
+        self.target = wp.vec3(6.0, 0.5, 0.0)
         # self.target = wp.vec3(-20.0, 30.0, 0.0)
 
         # Initialize material parameters
@@ -152,14 +153,17 @@ class Example:
             nesterov=False,
         )
 
-        self.com = wp.array([wp.vec3(0.0, 0.0, 0.0)], dtype=wp.vec3, requires_grad=True)
-        self.pos_error = wp.zeros(1, dtype=wp.float32, requires_grad=True)
+        # self.com = wp.array([wp.vec3(0.0, 0.0, 0.0)], dtype=wp.vec3, requires_grad=True)
+        # self.pos_error = wp.zeros(1, dtype=wp.float32, requires_grad=True)
         self.loss = wp.zeros(1, dtype=wp.float32, requires_grad=True)
 
         # allocate sim states for trajectory
         self.states = []
         for _i in range(self.sim_steps + 1):
             self.states.append(self.model.state())
+
+        wp.sim.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, None, self.states[0])
+
 
         if stage_path:
             self.renderer = wp.sim.render.SimRenderer(self.model, stage_path, scaling=1.0)
@@ -178,7 +182,6 @@ class Example:
 
     def create_model(self):
         builder = wp.sim.ModelBuilder()
-        # builder.default_particle_radius = 0.0005
 
 
         asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bear.usd")
@@ -193,97 +196,73 @@ class Example:
         self.points = [wp.vec3(point) for point in points]
         self.tet_indices = geom.GetPrim().GetAttribute("tetraIndices").Get()
 
-        # ke = 1.0e3
-        # kf = 0.0
-        # kd = 1.0e0
+        ke = 1.0e5
+        kf = 500.0
+        kd = 250.0
         # mu = 0.2
 
-        b = builder.add_body()
-        builder.add_shape_box(
-            body=b,
-            pos=(0,10,0),
-            hx = 0.3, hy = 0.3, hz = 0.3,
-            rot=wp.quat_rpy(0.0, 0.0, math.pi*-0.6),
-            # ke=ke,
-            # kf=kf,
-            # kd=kd,
-            # mu=mu
-        )
-
-        # builder.add_soft_mesh(
-        #     pos=wp.vec3(-2.0, 10.0, 0.0),
+        # b = builder.add_body(origin=wp.transform((0, 5, 0), wp.quat_identity()))
+        # builder.add_shape_box(
+        #     body=b,
+        #     pos=wp.vec3(0),
+        #     hx = 0.3, hy = 0.3, hz = 0.3,
+        #     # rot=wp.quat_rpy(0.0, 0.0, math.pi*-0.6),
         #     rot=wp.quat_identity(),
-        #     scale=1.0,
-        #     vel=wp.vec3(15.0, -5.0, 0.0),
-        #     vertices=self.points,
-        #     indices=self.tet_indices,
-        #     density=1.0,
-        #     k_mu=400.0,
-        #     k_lambda=400.0,
-        #     k_damp=2.0,
-        #     tri_ke=0.0,
-        #     tri_ka=1e-8,
-        #     tri_kd=0.0,
-        #     tri_drag=0.0,
-        #     tri_lift=0.0,
+        #     ke=ke,
+        #     kf=kf,
+        #     kd=kd,
+        #     # mu=mu
         # )
 
         
+
+
+        self.scale = 0.8
+        self.ke = 1.0e5
+        self.kd = 250.0
+        self.kf = 500.0
+
+        # boxes
+        # for i in range(self.num_bodies):
+        b = builder.add_body(origin=wp.transform((0.0, 3.0, 0.0), wp.quat_rpy(0.0, 0.0, math.pi*0.9)))
+
+        builder.add_shape_box(
+            # body=b,
+            body=b,
+            pos=wp.vec3(0.0, 0.0, 0.0),
+            hx=0.5 * self.scale,
+            hy=0.2 * self.scale,
+            hz=0.2 * self.scale,
+            ke=self.ke,
+            kd=self.kd,
+            kf=self.kf,
+        )
         builder.add_shape_box(
             body=-1,
-            pos=wp.vec3(0.0, 0.0, 0.0),
-            hx=5.0,
-            hy=30.0,
-            hz=30.0,
-            rot=wp.quat_rpy(0.0, 0.0, math.pi*-0.6)
-            # ke=ke,
-            # kf=kf,
-            # kd=kd,
+            pos=wp.vec3(0.0, 2.0, 0.0),
+            hx=0.5,
+            hy=15.0,
+            hz=2.0,
+            rot=wp.quat_rpy(0.0, 0.0, math.pi*-0.6),
+            ke=self.ke,
+            kf=self.kf,
+            kd=self.kd,
             # mu=mu,
         )
 
+        # initial spin
+        # for i in range(len(builder.body_qd)):
+        #     builder.body_qd[i] = (0.0, 2.0, 10.0, 0.0, 0.0, 0.0)
 
-        
-        asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bowl/Bowl.geom.usd")
-        mesh_geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/Bowl/Geom/Bowl"))
 
-        # asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bunny.usd")
-        # mesh_geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/root/bunny"))
-
-        
-
-        points = mesh_geom.GetPointsAttr().Get()
-        xform = Gf.Matrix4f(mesh_geom.ComputeLocalToWorldTransform(0.0))
-
-        for i in range(len(points)):
-            points[i] = xform.Transform(points[i])
-
-        indices = np.array(mesh_geom.GetFaceVertexIndicesAttr().Get()).flatten()
-        vertex_count = np.array(mesh_geom.GetFaceVertexCountsAttr().Get()).flatten()
-
-        indices = quad_mesh_to_triangles(indices, vertex_count)
-
-        bunny = wp.sim.Mesh(points, indices)
-        # builder.add_shape_mesh( 
-        #     body = -1,
-        #     mesh = bunny,
-        #     # rot = wp.quat_from_axis_angle(wp.vec3(1, 0, 0), math.pi*-0.5),
-        #     rot = wp.quat_rpy(math.pi*-0.5, -math.pi*0.5, 0.0),
-        #     # rot = wp.quat_identity(),
-        #     scale = (1.0, 1.0, 1.0),
-        #     # scale = (0.02, 0.02, 0.02),
-        #     pos = wp.vec3(3.0, 0.0, 0.0),
-        #     # thickness=1e-01,
-        #     ke = ke,
-        #     kf = kf,
-        #     kd = kd,
-        #     mu = mu
-        # )
 
         # use `requires_grad=True` to create a model for differentiable simulation
+        # self.builder = builder
         self.model = builder.finalize(requires_grad=True)
         self.model.shape_materials.kf.requires_grad = True
         self.model.ground = True
+
+
 
         # self.model.soft_contact_ke = ke
         # self.model.soft_contact_kf = kf
@@ -361,8 +340,8 @@ class Example:
             # clear grads for next iteration
             self.tape.zero()
             self.loss.zero_()
-            self.com.zero_()
-            self.pos_error.zero_()
+            # self.com.zero_()
+            # self.pos_error.zero_()
 
             self.iter = self.iter + 1
 
@@ -372,7 +351,6 @@ class Example:
 
         print(f"Iter: {self.iter} Loss: {self.loss.numpy()[0]}")
 
-        print(f"Pos error: {np.sqrt(self.pos_error.numpy()[0])}")
 
 
         print(f"KF Values: {x}")
@@ -402,7 +380,7 @@ class Example:
                 self.renderer.render_box(
                     pos=self.target,
                     rot=wp.quat_identity(),
-                    extents=(0.5, 0.5, 0.5),
+                    extents=(0.2, 0.2, 0.2),
                     name="target",
                     color=(0.0, 0.0, 0.0),
                 )
@@ -464,7 +442,7 @@ if __name__ == "__main__":
         # replay and optimize
         for i in range(args.train_iters):
             example.step()
-            if i == 0 or i % 50 == 0 or i == args.train_iters - 1:
+            if i == 0 or i % 5 == 0 or i == args.train_iters - 1:
                 example.render()
 
         if example.renderer:

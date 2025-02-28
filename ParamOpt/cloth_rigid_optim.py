@@ -31,6 +31,9 @@ import numpy as np
 def assign_param(params: wp.array(dtype=wp.vec3), model_params: wp.array(dtype=wp.vec3)):
     tid = wp.tid()
     model_params[tid] = params[0]
+    # model_params[tid][1] = 0.0
+    # model_params[tid][2] = 0.0
+
 
 @wp.kernel
 def com_kernel(positions: wp.array(dtype=wp.vec3), com: wp.array(dtype=wp.vec3)):
@@ -41,12 +44,10 @@ def com_kernel(positions: wp.array(dtype=wp.vec3), com: wp.array(dtype=wp.vec3))
 
 
 @wp.kernel
-def loss_kernel(com: wp.array(dtype=wp.vec3), target: wp.vec3, pos_error: wp.array(dtype=float), loss: wp.array(dtype=float)):
+def loss_kernel(com: wp.array(dtype=wp.vec3), target: wp.vec3, loss: wp.array(dtype=float)):
     # sq. distance to target
     diff = com[0] - target
-    pos_error[0] = wp.dot(diff, diff)
-    norm = pos_error[0]
-    loss[0] = norm
+    loss[0] = wp.dot(diff, diff)
 
 @wp.kernel
 def step_kernel(x: wp.array(dtype=wp.vec3), grad: wp.array(dtype=wp.vec3), alpha: float):
@@ -78,17 +79,18 @@ class Example:
 
         self.train_rate = 0.2
 
+        self.init_vel = wp.vec3(5.0, 0.0, 0.0)
         self.create_model()
 
-        self.integrator = wp.sim.FeatherstoneIntegrator(self.builder)
+        self.integrator = wp.sim.SemiImplicitIntegrator()
 
         # print(f"Shape 1: {self.velocities.numpy().shape}, Shape 2: {self.model.particle_qd.numpy().shape}")
 
         
 
-        self.target = (8.0, 0.0, 0.0)
+        self.target = (8.0, 0.0, -0.9)
         self.com = wp.zeros(1, dtype=wp.vec3, requires_grad=True)
-        self.pos_error = wp.zeros(1, dtype=wp.float32, requires_grad=True)
+        # self.pos_error = wp.zeros(1, dtype=wp.float32, requires_grad=True)
         self.loss = wp.zeros(1, dtype=wp.float32, requires_grad=True)
 
         # allocate sim states for trajectory
@@ -96,14 +98,14 @@ class Example:
         for _i in range(self.sim_steps + 1):
             self.states.append(self.model.state())
 
-        
+        self.velocities=wp.array([self.init_vel], dtype=wp.vec3, requires_grad=True)
         # self.velocities = wp.zeros(1, dtype=wp.vec3, requires_grad=True)
 
-        self.velocities = wp.array(
-            self.states[0].particle_qd.numpy()[0],
-            dtype=wp.vec3,
-            requires_grad=True
-        )
+        # self.velocities = wp.array(
+        #     self.states[0].particle_qd.numpy()[0],
+        #     dtype=wp.vec3,
+        #     requires_grad=True
+        # )
         self.optimizer = wp.optim.Adam(
             [self.velocities],
             lr=self.train_rate,
@@ -129,8 +131,8 @@ class Example:
         self.builder = wp.sim.ModelBuilder()
         # builder.default_particle_radius = 0.01
 
-        dim_x = 24
-        dim_y = 24
+        dim_x = 32
+        dim_y = 32
 
 
         # builder.add_cloth_grid(
@@ -150,8 +152,8 @@ class Example:
         # )
 
         self.builder.add_cloth_grid(
-            pos=wp.vec3(0.0, 0.0, 0.0),
-            vel=wp.vec3(5.1, 4.1, 1.0),
+            pos=wp.vec3(0.0, 4.0, 0.0),
+            vel=self.init_vel,
             rot=wp.quat_from_axis_angle(wp.vec3(1.0, 0.0, 0.0), -math.pi * 0.5),
             # rot = wp.quat_identity(),
             dim_x=dim_x,
@@ -168,49 +170,58 @@ class Example:
             # tri_drag=5.0,
         )
 
-        box_size = 0.3
+        box_size = 10.0
 
-        # self.builder.add_shape_box(
-        #     body=-1,
-        #     pos=wp.vec3(8.0, -1.0, 0.0),
-        #     rot=wp.quat_identity(),
-        #     hx=box_size, hy=1.0, hz=box_size,
-        #     ke=1.0e2,
-        #     kd=1.0e2,
-        #     kf=1.0e1,
-        #     # friction=1.0,
-        #     # restitution=0.5,
-        # )
-
-        asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bunny.usd")
-        mesh_geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/root/bunny"))
-
-        points = mesh_geom.GetPointsAttr().Get()
-        xform = Gf.Matrix4f(mesh_geom.ComputeLocalToWorldTransform(0.0))
-
-        for i in range(len(points)):
-            points[i] = xform.Transform(points[i])
-
-        indices = np.array(mesh_geom.GetFaceVertexIndicesAttr().Get()).flatten()
-
-        bunny = wp.sim.Mesh(points, indices)
-        self.builder.add_shape_mesh( 
-            body = -1,
-            mesh = bunny,
-            rot=wp.quat_from_axis_angle(wp.vec3(0.0, 1.0, 0.0), math.pi * -0.5),
-            # rot=wp.quat_identity(),
-            scale = (2.0, 2.0, 2.0),
-            pos = wp.vec3(8.0, -2.0, 0.0),
-            ke = 1.0e2,
-            kf = 1.0e2,
-            kd = 1.0e1,
+        self.builder.add_shape_box(
+            body=-1,
+            pos=wp.vec3(8.0, -1.0, 0.0),
+            rot=wp.quat_identity(),
+            hx=box_size, hy=1.0, hz=box_size,
+            ke=1.0e2,
+            kd=1.0e2,
+            kf=1.0e1,
+            # friction=1.0,
+            # restitution=0.5,
         )
 
+        # asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bunny.usd")
+        # mesh_geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/root/bunny"))
 
+        # points = mesh_geom.GetPointsAttr().Get()
+        # xform = Gf.Matrix4f(mesh_geom.ComputeLocalToWorldTransform(0.0))
+
+        # for i in range(len(points)):
+        #     points[i] = xform.Transform(points[i])
+
+        # indices = np.array(mesh_geom.GetFaceVertexIndicesAttr().Get()).flatten()
+
+        # bunny = wp.sim.Mesh(points, indices)
+        # self.builder.add_shape_mesh( 
+        #     body = -1,
+        #     mesh = bunny,
+        #     rot=wp.quat_from_axis_angle(wp.vec3(0.0, 1.0, 0.0), math.pi * -0.5),
+        #     # rot=wp.quat_identity(),
+        #     scale = (2.0, 2.0, 2.0),
+        #     pos = wp.vec3(8.0, -2.0, -0.9),
+        #     ke = 1.0e2,
+        #     kf = 1.0e2,
+        #     kd = 1.0e1,
+        # )
+
+        # ke = 1.0e3
+        kf = 0.0
+        # kd = 1.0e0
+        mu = 0.2
         self.model = self.builder.finalize(requires_grad=True)
         self.model.ground = False
         self.model.soft_contact_ke = 1.0e4
         self.model.soft_contact_kd = 1.0e2
+
+        self.model.soft_contact_kf = kf
+        self.model.soft_contact_mu = mu
+        self.model.soft_contact_margin = 1.0
+        self.model.soft_contact_restitution = 1.0
+
 
 
 
@@ -240,7 +251,7 @@ class Example:
             inputs=[self.states[-1].particle_q,],
             outputs=(self.com,),
         )
-        wp.launch(loss_kernel, dim=1, inputs=[self.com, self.target,], outputs=(self.pos_error, self.loss,),)
+        wp.launch(loss_kernel, dim=1, inputs=[self.com, self.target,], outputs=(self.loss,),)
 
     def step(self):
         with wp.ScopedTimer("step"):
@@ -267,7 +278,7 @@ class Example:
             self.tape.zero()
             self.loss.zero_()
             self.com.zero_()
-            self.pos_error.zero_()
+            # self.pos_error.zero_()
 
             self.iter = self.iter + 1
 
@@ -337,7 +348,7 @@ if __name__ == "__main__":
         # replay and optimize
         for i in range(args.train_iters):
             example.step()
-            if i % 1 == 0 or i == args.train_iters-1:
+            if i % 4 == 0 or i == args.train_iters-1:
                 example.render()
 
         if example.renderer:
