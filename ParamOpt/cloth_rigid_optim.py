@@ -76,11 +76,11 @@ class Example:
         self.iter = 0
         self.render_time = 0.0
 
-        self.train_rate = 0.01
+        self.train_rate = 0.2
 
         self.create_model()
 
-        self.integrator = wp.sim.SemiImplicitIntegrator()
+        self.integrator = wp.sim.FeatherstoneIntegrator(self.builder)
 
         # print(f"Shape 1: {self.velocities.numpy().shape}, Shape 2: {self.model.particle_qd.numpy().shape}")
 
@@ -104,10 +104,10 @@ class Example:
             dtype=wp.vec3,
             requires_grad=True
         )
-        self.optimizer = wp.optim.SGD(
+        self.optimizer = wp.optim.Adam(
             [self.velocities],
             lr=self.train_rate,
-            nesterov=False,
+            # nesterov=False,
         )
 
         if stage_path:
@@ -126,22 +126,40 @@ class Example:
             self.graph = capture.graph
 
     def create_model(self):
-        builder = wp.sim.ModelBuilder()
+        self.builder = wp.sim.ModelBuilder()
         # builder.default_particle_radius = 0.01
 
         dim_x = 24
         dim_y = 24
 
 
-        builder.add_cloth_grid(
+        # builder.add_cloth_grid(
+        #     pos=wp.vec3(0.0, 0.0, 0.0),
+        #     vel=wp.vec3(0.1, 0.1, 0.0),
+        #     rot=wp.quat_from_axis_angle(wp.vec3(1.0, 0.0, 0.0), -math.pi * 0.25),
+        #     dim_x=dim_x,
+        #     dim_y=dim_y,
+        #     cell_x=1.0 / dim_x,
+        #     cell_y=1.0 / dim_y,
+        #     mass=1.0,
+        #     tri_ke=10000.0,
+        #     tri_ka=10000.0,
+        #     tri_kd=100.0,
+        #     tri_lift=10.0,
+        #     tri_drag=5.0,
+        # )
+
+        self.builder.add_cloth_grid(
             pos=wp.vec3(0.0, 0.0, 0.0),
-            vel=wp.vec3(0.1, 0.1, 0.0),
+            vel=wp.vec3(5.1, 4.1, 1.0),
             rot=wp.quat_from_axis_angle(wp.vec3(1.0, 0.0, 0.0), -math.pi * 0.5),
             # rot = wp.quat_identity(),
             dim_x=dim_x,
             dim_y=dim_y,
-            cell_x=0.1,
-            cell_y=0.1,
+            cell_x=0.1*1,
+            cell_y=0.1*1,
+            # cell_x=1.0/dim_x,
+            # cell_y=1.0/dim_y,
             mass=0.1,
             tri_ke=1.0e3,
             tri_ka=1.0e3,
@@ -150,46 +168,51 @@ class Example:
             # tri_drag=5.0,
         )
 
-        builder.add_shape_box(
-            body=-1,
-            pos=wp.vec3(8.0, -2.0, 0.0),
-            rot=wp.quat_identity(),
-            hx=2.0, hy=1.0, hz=2.0,
-            ke=1.0e2,
-            kd=1.0e2,
-            kf=1.0e1,
-            # friction=1.0,
-            # restitution=0.5,
-        )
+        box_size = 0.3
 
-        # asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bunny.usd")
-        # mesh_geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/root/bunny"))
-
-        
-
-        # points = mesh_geom.GetPointsAttr().Get()
-        # xform = Gf.Matrix4f(mesh_geom.ComputeLocalToWorldTransform(0.0))
-
-        # for i in range(len(points)):
-        #     points[i] = xform.Transform(points[i])
-
-        # indices = np.array(mesh_geom.GetFaceVertexIndicesAttr().Get()).flatten()
-
-        # bunny = wp.sim.Mesh(points, indices)
-        # builder.add_shape_mesh( 
-        #     body = -1,
-        #     mesh = bunny,
-        #     rot=wp.quat_from_axis_angle(wp.vec3(0.0, 1.0, 0.0), math.pi * 0.5),
-        #     scale = (2.0, 2.0, 2.0),
-        #     pos = wp.vec3(3.0, -2.0, 0.0),
-        #     ke = 1.0e2,
-        #     kf = 1.0e2,
-        #     kd = 1.0e1,
+        # self.builder.add_shape_box(
+        #     body=-1,
+        #     pos=wp.vec3(8.0, -1.0, 0.0),
+        #     rot=wp.quat_identity(),
+        #     hx=box_size, hy=1.0, hz=box_size,
+        #     ke=1.0e2,
+        #     kd=1.0e2,
+        #     kf=1.0e1,
+        #     # friction=1.0,
+        #     # restitution=0.5,
         # )
 
+        asset_stage = Usd.Stage.Open("/home/miren/Documents/ParamOpt/assets/bunny.usd")
+        mesh_geom = UsdGeom.Mesh(asset_stage.GetPrimAtPath("/root/bunny"))
 
-        self.model = builder.finalize(requires_grad=True)
+        points = mesh_geom.GetPointsAttr().Get()
+        xform = Gf.Matrix4f(mesh_geom.ComputeLocalToWorldTransform(0.0))
+
+        for i in range(len(points)):
+            points[i] = xform.Transform(points[i])
+
+        indices = np.array(mesh_geom.GetFaceVertexIndicesAttr().Get()).flatten()
+
+        bunny = wp.sim.Mesh(points, indices)
+        self.builder.add_shape_mesh( 
+            body = -1,
+            mesh = bunny,
+            rot=wp.quat_from_axis_angle(wp.vec3(0.0, 1.0, 0.0), math.pi * -0.5),
+            # rot=wp.quat_identity(),
+            scale = (2.0, 2.0, 2.0),
+            pos = wp.vec3(8.0, -2.0, 0.0),
+            ke = 1.0e2,
+            kf = 1.0e2,
+            kd = 1.0e1,
+        )
+
+
+        self.model = self.builder.finalize(requires_grad=True)
         self.model.ground = False
+        self.model.soft_contact_ke = 1.0e4
+        self.model.soft_contact_kd = 1.0e2
+
+
 
 
 
