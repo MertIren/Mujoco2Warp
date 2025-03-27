@@ -77,7 +77,7 @@ class Example:
         self.iter = 0
         self.render_time = 0.0
 
-        self.train_rate = 0.2
+        self.train_rate = 0.1
 
         self.init_vel = wp.vec3(5.0, 0.0, 0.0)
         self.create_model()
@@ -87,7 +87,7 @@ class Example:
         # print(f"Shape 1: {self.velocities.numpy().shape}, Shape 2: {self.model.particle_qd.numpy().shape}")
 
         
-
+        # self.model.enable_tri_collisions = True
         self.target = (8.0, 0.0, -0.9)
         self.com = wp.zeros(1, dtype=wp.vec3, requires_grad=True)
         # self.pos_error = wp.zeros(1, dtype=wp.float32, requires_grad=True)
@@ -170,7 +170,7 @@ class Example:
             # tri_drag=5.0,
         )
 
-        box_size = 10.0
+        box_size = 0.5
 
         self.builder.add_shape_box(
             body=-1,
